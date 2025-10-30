@@ -1,43 +1,20 @@
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
-use glam::Vec3;
+use glam::{Quat, Vec2, Vec3};
 use wgpu::util::DeviceExt;
 
 use winit::{
-    event::{Event, WindowEvent},
+    dpi::PhysicalSize,
+    event::{Event, KeyEvent, WindowEvent},
     event_loop::EventLoop,
-    window::Window,
+    keyboard::{KeyCode, PhysicalKey},
+    window::{CursorGrabMode, Window, WindowBuilder},
 };
 
-#[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct IParams {
-    camera_pos: Vec3,
-    _pad1: u32,
-    light_dir: Vec3,
-    _pad2: u32,
-    width: u32,
-    height: u32,
-    i_time: f32,
-    sphere_count: u32,
-}
+use crate::utils::*;
 
-#[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct Sphere {
-    position: Vec3,
-    radius: f32,
-    material: Material,
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct Material {
-    diffuse_color: Vec3,
-    smoothness: f32,
-    emission_color: Vec3,
-    emission_strength: f32,
-}
+mod scenes;
+mod utils;
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
     let window = Arc::new(window);
@@ -54,17 +31,25 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         .expect("error finding adapter");
 
     let (device, queue) = adapter
-        .request_device(&Default::default(), None)
+        .request_device(
+            &wgpu::DeviceDescriptor {
+                label: None,
+                required_features: wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
+                required_limits: Default::default(),
+                memory_hints: Default::default(),
+            },
+            None,
+        )
         .await
         .expect("error creating device");
-    let size = window.inner_size();
+    let mut size = window.inner_size();
     let swapchain_capabilities = surface.get_capabilities(&adapter);
     let format = swapchain_capabilities.formats[0];
     let mut sc = wgpu::SurfaceConfiguration {
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
         format,
         width: size.width,
-        present_mode: wgpu::PresentMode::AutoVsync,
+        present_mode: wgpu::PresentMode::AutoNoVsync,
         height: size.height,
         alpha_mode: swapchain_capabilities.alpha_modes[0],
         view_formats: vec![],
@@ -127,7 +112,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         cache: None,
     });
 
-    let img = device.create_texture(&wgpu::TextureDescriptor {
+    let mut img = device.create_texture(&wgpu::TextureDescriptor {
         label: None,
         size: wgpu::Extent3d {
             width: size.width,
@@ -141,7 +126,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
         view_formats: &[],
     });
-    let img_view = img.create_view(&Default::default());
+    let mut img_view = img.create_view(&Default::default());
 
     const CONFIG_SIZE: u64 = size_of::<IParams>() as u64;
 
@@ -153,74 +138,69 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             | wgpu::BufferUsages::UNIFORM,
         mapped_at_creation: false,
     });
-    let config_resource = config_dev.as_entire_binding();
 
-    let spheres = vec![
-        Sphere {
-            position: Vec3::new(-4.0, 0.4, -0.4),
-            radius: 0.4,
-            material: Material {
-                diffuse_color: Vec3::new(0.2, 0.2, 0.2),
-                emission_color: Vec3::new(0.0, 0.0, 0.0),
-                emission_strength: 0.0,
-                smoothness: 0.0,
-            },
-        },
-        Sphere {
-            position: Vec3::new(-2.5, 0.75, -0.2),
-            radius: 0.75,
-            material: Material {
-                diffuse_color: Vec3::new(0.13, 0.51, 0.95),
-                emission_color: Vec3::new(0.0, 0.0, 0.0),
-                emission_strength: 0.0,
-                smoothness: 0.0,
-            },
-        },
-        Sphere {
-            position: Vec3::new(-0.5, 1.0, 0.0),
-            radius: 1.0,
-            material: Material {
-                diffuse_color: Vec3::new(0.28, 0.94, 0.07),
-                emission_color: Vec3::new(0.23, 1.0, 0.01),
-                emission_strength: 0.0,
-                smoothness: 0.95,
-            },
-        },
-        Sphere {
-            position: Vec3::new(2.0, 1.25, -0.2),
-            radius: 1.25,
-            material: Material {
-                diffuse_color: Vec3::new(1.0, 0.06, 0.06),
-                emission_color: Vec3::new(0.0, 0.0, 0.0),
-                emission_strength: 0.0,
-                smoothness: 0.0,
-            },
-        },
-        Sphere {
-            position: Vec3::new(5.5, 2.0, -0.4),
-            radius: 2.0,
-            material: Material {
-                diffuse_color: Vec3::new(1.0, 1.0, 1.0),
-                emission_color: Vec3::new(1.0, 1.0, 1.0),
-                emission_strength: 0.0,
-                smoothness: 0.0,
-            },
-        },
-        Sphere {
-            position: Vec3::new(0.0, -100.0, 0.0),
-            radius: 100.0,
-            material: Material {
-                diffuse_color: Vec3::new(0.38, 0.16, 0.81),
-                emission_color: Vec3::new(0.38, 0.16, 0.81),
-                emission_strength: 0.0,
-                smoothness: 0.0,
-            },
-        },
-    ];
+    let (spheres, triangles) = if let Some(arg) = std::env::args().nth(1) {
+        match arg.as_str() {
+            "cornell" => scenes::cornell_box(),
+            "spheres" => scenes::spheres(),
+            _ => scenes::spheres(),
+        }
+    } else {
+        scenes::spheres()
+    };
+
+    let triangle_vertices = triangles
+        .iter()
+        .flat_map(|mesh| {
+            mesh.vertices
+                .iter()
+                .map(|x| x.extend(0.0))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+
+    let gpu_triangles = triangles
+        .iter()
+        .scan(0, |start_index, mesh| {
+            let gpu_mesh = GPUTriangleMesh {
+                start_index: *start_index,
+                vertex_count: mesh.vertices.len() as u32,
+                aabb: mesh.aabb,
+                material: mesh.material,
+                ..Default::default()
+            };
+            *start_index += gpu_mesh.vertex_count;
+            Some(gpu_mesh)
+        })
+        .collect::<Vec<GPUTriangleMesh>>();
+
+    println!(
+        "{:?}",
+        gpu_triangles
+            .iter()
+            .map(|x| (x.start_index, x.vertex_count))
+            .collect::<Vec<_>>()
+    );
 
     let sphere_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Sphere Buffer"),
         contents: bytemuck::cast_slice(&spheres),
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
+    });
+
+    let triangle_vertices_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Triangle Buffer"),
+        contents: bytemuck::cast_slice(&triangle_vertices),
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
+    });
+
+    let gpu_triangles_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("GPU Triangle Mesh Buffer"),
+        contents: bytemuck::cast_slice(&gpu_triangles),
         usage: wgpu::BufferUsages::STORAGE
             | wgpu::BufferUsages::COPY_DST
             | wgpu::BufferUsages::COPY_SRC,
@@ -251,7 +231,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 binding: 1,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::StorageTexture {
-                    access: wgpu::StorageTextureAccess::WriteOnly,
+                    access: wgpu::StorageTextureAccess::ReadWrite,
                     format: wgpu::TextureFormat::Rgba8Unorm,
                     view_dimension: wgpu::TextureViewDimension::D2,
                 },
@@ -259,6 +239,26 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             },
             wgpu::BindGroupLayoutEntry {
                 binding: 2,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 3,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 4,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Storage { read_only: true },
@@ -282,13 +282,13 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         cache: None,
         compilation_options: wgpu::PipelineCompilationOptions::default(),
     });
-    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+    let mut bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
         layout: &bind_group_layout,
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: config_resource,
+                resource: config_dev.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
@@ -297,6 +297,14 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             wgpu::BindGroupEntry {
                 binding: 2,
                 resource: sphere_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: triangle_vertices_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: gpu_triangles_buffer.as_entire_binding(),
             },
         ],
     });
@@ -309,7 +317,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         mipmap_filter: wgpu::FilterMode::Nearest,
         ..Default::default()
     });
-    let copy_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+    let mut copy_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
         layout: &copy_bind_group_layout,
         entries: &[
@@ -323,7 +331,15 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             },
         ],
     });
-    let start_time = std::time::Instant::now();
+    // let start_time = std::time::Instant::now();
+    let mut keys_pressed = HashSet::new();
+    let mut mouse_grabbed = false;
+    let mut light_dir = Vec3::new(0.2, 1.0, 0.05).normalize();
+    let mut camera_dir = Quat::IDENTITY;
+    let mut camera_pos = Vec3::new(0.0, 0.0, 5.0);
+    let mut last_update = std::time::Instant::now();
+    let mut mouse_delta = Vec2::ZERO;
+    let mut accumulated_frames = 0;
 
     event_loop
         .run(move |event, target| {
@@ -334,29 +350,90 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             {
                 match event {
                     WindowEvent::RedrawRequested => {
+                        accumulated_frames += 1;
+                        let delta_time = last_update.elapsed().as_secs_f32();
+                        last_update = std::time::Instant::now();
+                        let (mut yaw, mut pitch, _) = camera_dir.to_euler(glam::EulerRot::YXZ);
+                        let local_z = camera_dir * Vec3::Z;
+                        let forward = -Vec3::new(local_z.x, 0.0, local_z.z).normalize_or_zero();
+                        let right = Vec3::new(local_z.z, 0.0, -local_z.x).normalize_or_zero();
+                        let mut move_dir = Vec3::ZERO;
+                        for code in keys_pressed.iter() {
+                            match code {
+                                KeyCode::ArrowUp => {
+                                    light_dir = (Quat::from_rotation_x(-2.5 * delta_time)
+                                        * light_dir)
+                                        .normalize();
+                                }
+                                KeyCode::ArrowDown => {
+                                    light_dir = (Quat::from_rotation_x(2.5 * delta_time)
+                                        * light_dir)
+                                        .normalize();
+                                }
+                                KeyCode::ArrowLeft => {
+                                    light_dir = (Quat::from_rotation_y(-2.5 * delta_time)
+                                        * light_dir)
+                                        .normalize();
+                                }
+                                KeyCode::ArrowRight => {
+                                    light_dir = (Quat::from_rotation_y(2.5 * delta_time)
+                                        * light_dir)
+                                        .normalize();
+                                }
+                                KeyCode::KeyW => {
+                                    move_dir += forward;
+                                }
+                                KeyCode::KeyS => {
+                                    move_dir -= forward;
+                                }
+                                KeyCode::KeyA => {
+                                    move_dir -= right;
+                                }
+                                KeyCode::KeyD => {
+                                    move_dir += right;
+                                }
+                                KeyCode::Space => {
+                                    move_dir += Vec3::Y;
+                                }
+                                KeyCode::ShiftLeft => {
+                                    move_dir -= Vec3::Y;
+                                }
+                                _ => {}
+                            }
+                            accumulated_frames = 0;
+                        }
+
+                        let window_scale = size.height.max(size.width) as f32;
+                        pitch -= (mouse_delta.y * window_scale * 0.0015).to_radians();
+                        yaw -= (mouse_delta.x * window_scale * 0.0015).to_radians();
+                        mouse_delta = Vec2::ZERO;
+                        camera_pos += move_dir.normalize_or_zero()
+                            * if keys_pressed.contains(&KeyCode::ControlLeft) {
+                                30.0
+                            } else {
+                                10.0
+                            }
+                            * delta_time;
+                        camera_dir = Quat::from_rotation_y(yaw)
+                            * Quat::from_rotation_x(pitch.clamp(-1.54, 1.54));
+
                         let frame = surface
                             .get_current_texture()
                             .expect("error getting texture from swap chain");
 
-                        let i_time: f32 = 0.5 + start_time.elapsed().as_micros() as f32 * 1e-6;
+                        // let i_time: f32 = start_time.elapsed().as_secs_f32();
                         let config_data = IParams {
-                            camera_pos: Vec3::new(0.0, 0.0, 5.0),
-                            _pad1: 0,
-                            light_dir: Vec3::new(0.2, 1.0, 0.05).normalize(),
-                            _pad2: 0,
+                            camera_pos,
+                            random_seed: rand::random(),
+                            light_dir: light_dir.normalize_or_zero(),
+                            accumulated_frames,
                             width: size.width,
                             height: size.height,
-                            i_time,
+                            triangle_mesh_count: gpu_triangles.len() as u32,
                             sphere_count: spheres.len() as u32,
                         };
-                        let config_host =
-                            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: None,
-                                contents: bytemuck::cast_slice(&[config_data]),
-                                usage: wgpu::BufferUsages::COPY_SRC,
-                            });
+                        queue.write_buffer(&config_dev, 0, bytemuck::bytes_of(&config_data));
                         let mut encoder = device.create_command_encoder(&Default::default());
-                        encoder.copy_buffer_to_buffer(&config_host, 0, &config_dev, 0, CONFIG_SIZE);
                         {
                             let mut cpass = encoder.begin_compute_pass(&Default::default());
                             cpass.set_pipeline(&pipeline);
@@ -390,11 +467,92 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         frame.present();
                         window_clone.request_redraw();
                     }
-                    WindowEvent::Resized(size) => {
-                        if size.width > 0 && size.height > 0 {
-                            sc.width = size.width;
-                            sc.height = size.height;
+                    WindowEvent::Resized(s) => {
+                        if s.width > 0 && s.height > 0 {
+                            size = s;
+                            sc.width = s.width;
+                            sc.height = s.height;
                             surface.configure(&device, &sc);
+
+                            img = device.create_texture(&wgpu::TextureDescriptor {
+                                label: None,
+                                size: wgpu::Extent3d {
+                                    width: s.width,
+                                    height: s.height,
+                                    depth_or_array_layers: 1,
+                                },
+                                mip_level_count: 1,
+                                sample_count: 1,
+                                dimension: wgpu::TextureDimension::D2,
+                                format: wgpu::TextureFormat::Rgba8Unorm,
+                                usage: wgpu::TextureUsages::STORAGE_BINDING
+                                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                                view_formats: &[],
+                            });
+                            img_view = img.create_view(&Default::default());
+
+                            bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: None,
+                                layout: &bind_group_layout,
+                                entries: &[
+                                    wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: config_dev.as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource: wgpu::BindingResource::TextureView(&img_view),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 2,
+                                        resource: sphere_buffer.as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 3,
+                                        resource: triangle_vertices_buffer.as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 4,
+                                        resource: gpu_triangles_buffer.as_entire_binding(),
+                                    },
+                                ],
+                            });
+
+                            copy_bind_group =
+                                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                    label: None,
+                                    layout: &copy_bind_group_layout,
+                                    entries: &[
+                                        wgpu::BindGroupEntry {
+                                            binding: 0,
+                                            resource: wgpu::BindingResource::TextureView(&img_view),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 1,
+                                            resource: wgpu::BindingResource::Sampler(&sampler),
+                                        },
+                                    ],
+                                });
+                        }
+                    }
+                    WindowEvent::KeyboardInput {
+                        event:
+                            KeyEvent {
+                                physical_key: PhysicalKey::Code(code),
+                                state: key_state,
+                                ..
+                            },
+                        ..
+                    } => {
+                        if key_state.is_pressed() {
+                            if code == KeyCode::Escape && mouse_grabbed {
+                                window_clone.set_cursor_grab(CursorGrabMode::None).unwrap();
+                                window_clone.set_cursor_visible(true);
+                                mouse_grabbed = false;
+                            }
+                            keys_pressed.insert(code);
+                        } else {
+                            keys_pressed.remove(&code);
                         }
                     }
                     WindowEvent::CloseRequested => {
@@ -409,7 +567,10 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
 fn main() {
     let event_loop = EventLoop::new().unwrap();
-    let window = Window::new(&event_loop).unwrap();
-    window.set_title("Ray Tracing");
+    let window = WindowBuilder::new()
+        .with_title("Ray Tracing")
+        .with_inner_size(PhysicalSize::new(1280, 720))
+        .build(&event_loop)
+        .unwrap();
     pollster::block_on(run(event_loop, window));
 }

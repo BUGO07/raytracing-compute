@@ -1,11 +1,17 @@
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var output_tex: texture_storage_2d<rgba8unorm, read_write>;
+@group(0) @binding(2) var<storage, read> spheres: array<Sphere>;
+@group(0) @binding(3) var<storage, read> triangle_vertices: array<vec4f>;
+@group(0) @binding(4) var<storage, read> triangle_meshes: array<TriangleMesh>;
+
 struct Params {
     camera_pos: vec3f,
-    _pad1: u32,
+    random_seed: f32,
     light_dir: vec3f,
-    _pad2: u32,
+    accumulated_frames: u32,
     width: u32,
     height: u32,
-    iTime: f32,
+    triangle_mesh_count: u32,
     sphere_count: u32,
 };
 
@@ -22,14 +28,18 @@ struct Sphere {
     material: Material,
 };
 
-@group(0) @binding(0) var<uniform> params: Params;
-@group(0) @binding(1) var outputTex: texture_storage_2d<rgba8unorm, write>;
-@group(0) @binding(2) var<storage, read> spheres: array<Sphere>;
+struct TriangleMesh {
+    _pad: vec2f,
+    start_index: u32,
+    vertex_count: u32,
+    aabb: Aabb,
+    material: Material,
+};
 
-const PI: f32 = 3.141592;
-
-const MAX_BOUNCES: u32 = 5u;
-const RAYS_PER_PIXEL: u32 = 5u;
+struct Aabb {
+    min: vec4f,
+    max: vec4f,
+};
 
 struct Ray {
     origin: vec3f,
@@ -43,6 +53,19 @@ struct RayHit {
     material: Material,
     hit: bool,
 };
+
+const PI: f32 = 3.141592;
+
+const MAX_BOUNCES: u32 = 5u;
+const RAYS_PER_PIXEL: u32 = 5u;
+
+const GROUND_COLOR: vec3f = vec3f(0.35, 0.3, 0.35);
+const SKY_COLOR_HORIZON: vec3f = vec3f(1.0, 1.0, 1.0);
+const SKY_COLOR_ZENITH: vec3f = vec3f(0.08, 0.37, 0.73);
+
+const SUN_INTENSITY: f32 = 10.0;
+const SUN_FOCUS: f32 = 500.0;
+const SUN_COLOR: vec3f = vec3f(1.0, 0.9, 0.6);
 
 fn hash(seed: vec2f) -> u32 {
     var h = u32(seed.x * 73856093.0) ^ u32(seed.y * 19349663.0);
@@ -74,13 +97,6 @@ fn random_direction(state: ptr<function, u32>) -> vec3f {
     let z = random_normal_distribution(state);
     return normalize(vec3f(x, y, z));
 }
-const GROUND_COLOR: vec3f = vec3f(0.35, 0.3, 0.35);
-const SKY_COLOR_HORIZON: vec3f = vec3f(1.0, 1.0, 1.0);
-const SKY_COLOR_ZENITH: vec3f = vec3f(0.8, 0.8, 0.8);
-
-const SUN_INTENSITY: f32 = 10.0;
-const SUN_FOCUS: f32 = 500.0;
-const SUN_COLOR: vec3f = vec3f(1.0, 0.9, 0.6);
 
 fn get_environment_light(ray: Ray, light_dir: vec3f) -> vec3f {
     let sky_gradient = mix(SKY_COLOR_HORIZON,
@@ -147,7 +163,31 @@ fn calculate_collision(ray: Ray) -> RayHit {
             closest_hit = hit;
         }
     }
+    for (var i: u32 = 0u; i < params.triangle_mesh_count; i = i + 1u) {
+        let tri_mesh = triangle_meshes[i];
+        if !aabb_intersect(ray, tri_mesh.aabb) {
+            continue;
+        }
+        for (var j: u32 = 0u; j < tri_mesh.vertex_count / 3u; j = j + 1u) {
+            let hit = triangle_intersect(ray, tri_mesh.start_index + j * 3u);
+            if hit.hit && (!closest_hit.hit || hit.distance < closest_hit.distance) {
+                closest_hit = hit;
+                closest_hit.material = tri_mesh.material;
+            }
+        }
+    }
     return closest_hit;
+}
+
+fn aabb_intersect(ray: Ray, aabb: Aabb) -> bool {
+    let inv_dir = 1.0 / ray.direction;
+    let t1 = (aabb.min.xyz - ray.origin) * inv_dir;
+    let t2 = (aabb.max.xyz - ray.origin) * inv_dir;
+
+    let tmin = max(max(min(t1.x, t2.x), min(t1.y, t2.y)), min(t1.z, t2.z));
+    let tmax = min(min(max(t1.x, t2.x), max(t1.y, t2.y)), max(t1.z, t2.z));
+
+    return tmax >= max(tmin, 0.0);
 }
 
 fn sphere_intersect(ray: Ray, sphere: Sphere) -> RayHit {
@@ -174,21 +214,66 @@ fn sphere_intersect(ray: Ray, sphere: Sphere) -> RayHit {
     }
 }
 
+// moller-trumbore algorithm
+fn triangle_intersect(ray: Ray, v0_idx: u32) -> RayHit {
+    var hit: RayHit;
+    let v0 = triangle_vertices[v0_idx].xyz;
+    let v1 = triangle_vertices[v0_idx + 1u].xyz;
+    let v2 = triangle_vertices[v0_idx + 2u].xyz;
+
+    let edge1 = v1 - v0;
+    let edge2 = v2 - v0;
+    let h = cross(ray.direction, edge2);
+    let a = dot(edge1, h);
+
+    if abs(a) < 0.0001 {
+        return hit;
+    }
+
+    let f = 1.0 / a;
+    let s = ray.origin - v0;
+    let u = f * dot(s, h);
+
+    if u < 0.0 || u > 1.0 {
+        return hit;
+    }
+
+    let q = cross(s, edge1);
+    let v = f * dot(ray.direction, q);
+
+    if v < 0.0 || u + v > 1.0 {
+        return hit;
+    }
+
+    let t = f * dot(edge2, q);
+
+    if t > 0.0001 {
+        hit.distance = t;
+        hit.position = ray.origin + t * ray.direction;
+        hit.normal = normalize(cross(edge1, edge2));
+        hit.hit = true;
+    }
+
+    return hit;
+}
+
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) global_ix: vec3<u32>) {
-    let fragCoord = vec2f(global_ix.xy) / vec2f(f32(params.width), f32(params.height)) ;
+    let frag_coord = vec2f(global_ix.xy) / vec2f(f32(params.width), f32(params.height)) ;
 
     let aspect_ratio = f32(params.width) / f32(params.height);
     let half_fov_tan = tan(radians(60.0) * 0.5);
-    let px = (2.0 * fragCoord.x - 1.0) * half_fov_tan * aspect_ratio;
-    let py = (1.0 - 2.0 * fragCoord.y) * half_fov_tan;
+    let px = (2.0 * frag_coord.x - 1.0) * half_fov_tan * aspect_ratio;
+    let py = (1.0 - 2.0 * frag_coord.y) * half_fov_tan;
     let ray_dir = normalize(vec3f(px, py, -1.0));
     var ray = Ray(params.camera_pos, ray_dir);
 
-    var state = hash(fragCoord.xy + params.iTime);
+    var state = hash(frag_coord.xy + params.random_seed);
 
+    let last_frame = textureLoad(output_tex, vec2i(global_ix.xy)).rgb;
+    let weight = 1.0 / f32(params.accumulated_frames + 1u);
 
-    let fragColor = vec4f(trace(&ray, &state), 1.0);
+    var frag_color = vec4f(mix(last_frame.rgb, trace(&ray, &state), weight), 1.0);
 
-    textureStore(outputTex, vec2i(global_ix.xy), fragColor);
+    textureStore(output_tex, vec2i(global_ix.xy), frag_color);
 }
