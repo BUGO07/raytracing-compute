@@ -12,8 +12,10 @@ use winit::{
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct IParams {
-    camera_pos: [f32; 3],
+    camera_pos: Vec3,
     _pad1: u32,
+    light_dir: Vec3,
+    _pad2: u32,
     width: u32,
     height: u32,
     i_time: f32,
@@ -23,7 +25,7 @@ struct IParams {
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct Sphere {
-    center: [f32; 3],
+    position: Vec3,
     radius: f32,
     material: Material,
 }
@@ -31,9 +33,9 @@ struct Sphere {
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct Material {
-    diffuse_color: [f32; 3],
-    _pad: f32,
-    emission_color: [f32; 3],
+    diffuse_color: Vec3,
+    smoothness: f32,
+    emission_color: Vec3,
     emission_strength: f32,
 }
 
@@ -62,8 +64,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
         format,
         width: size.width,
-        height: size.height,
         present_mode: wgpu::PresentMode::AutoVsync,
+        height: size.height,
         alpha_mode: swapchain_capabilities.alpha_modes[0],
         view_formats: vec![],
         desired_maximum_frame_latency: 2,
@@ -153,22 +155,68 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     });
     let config_resource = config_dev.as_entire_binding();
 
-    let spheres = (0..2)
-        .map(|i| Sphere {
-            center: if i == 0 {
-                Vec3::NEG_Y.into()
-            } else {
-                Vec3::Y.into()
+    let spheres = vec![
+        Sphere {
+            position: Vec3::new(-4.0, 0.4, -0.4),
+            radius: 0.4,
+            material: Material {
+                diffuse_color: Vec3::new(0.2, 0.2, 0.2),
+                emission_color: Vec3::new(0.0, 0.0, 0.0),
+                emission_strength: 0.0,
+                smoothness: 0.0,
             },
+        },
+        Sphere {
+            position: Vec3::new(-2.5, 0.75, -0.2),
+            radius: 0.75,
+            material: Material {
+                diffuse_color: Vec3::new(0.13, 0.51, 0.95),
+                emission_color: Vec3::new(0.0, 0.0, 0.0),
+                emission_strength: 0.0,
+                smoothness: 0.0,
+            },
+        },
+        Sphere {
+            position: Vec3::new(-0.5, 1.0, 0.0),
             radius: 1.0,
             material: Material {
-                diffuse_color: Vec3::new(1.0, 0.0, 0.0).into(),
-                _pad: 0.0,
-                emission_color: Vec3::new(1.0, 1.0, 1.0).into(),
-                emission_strength: if i == 0 { 1.0 } else { 0.0 },
+                diffuse_color: Vec3::new(0.28, 0.94, 0.07),
+                emission_color: Vec3::new(0.23, 1.0, 0.01),
+                emission_strength: 0.0,
+                smoothness: 0.95,
             },
-        })
-        .collect::<Vec<_>>();
+        },
+        Sphere {
+            position: Vec3::new(2.0, 1.25, -0.2),
+            radius: 1.25,
+            material: Material {
+                diffuse_color: Vec3::new(1.0, 0.06, 0.06),
+                emission_color: Vec3::new(0.0, 0.0, 0.0),
+                emission_strength: 0.0,
+                smoothness: 0.0,
+            },
+        },
+        Sphere {
+            position: Vec3::new(5.5, 2.0, -0.4),
+            radius: 2.0,
+            material: Material {
+                diffuse_color: Vec3::new(1.0, 1.0, 1.0),
+                emission_color: Vec3::new(1.0, 1.0, 1.0),
+                emission_strength: 0.0,
+                smoothness: 0.0,
+            },
+        },
+        Sphere {
+            position: Vec3::new(0.0, -100.0, 0.0),
+            radius: 100.0,
+            material: Material {
+                diffuse_color: Vec3::new(0.38, 0.16, 0.81),
+                emission_color: Vec3::new(0.38, 0.16, 0.81),
+                emission_strength: 0.0,
+                smoothness: 0.0,
+            },
+        },
+    ];
 
     let sphere_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Sphere Buffer"),
@@ -292,12 +340,14 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
                         let i_time: f32 = 0.5 + start_time.elapsed().as_micros() as f32 * 1e-6;
                         let config_data = IParams {
-                            camera_pos: Vec3::new(0.0, 0.0, 5.0).into(),
+                            camera_pos: Vec3::new(0.0, 0.0, 5.0),
                             _pad1: 0,
+                            light_dir: Vec3::new(0.2, 1.0, 0.05).normalize(),
+                            _pad2: 0,
                             width: size.width,
                             height: size.height,
                             i_time,
-                            sphere_count: 2,
+                            sphere_count: spheres.len() as u32,
                         };
                         let config_host =
                             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
