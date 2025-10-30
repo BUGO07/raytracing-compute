@@ -1,13 +1,41 @@
 use std::sync::Arc;
 
+use glam::Vec3;
 use wgpu::util::DeviceExt;
-use wgpu::{BufferUsages, Extent3d, PipelineCompilationOptions, SamplerBindingType};
 
 use winit::{
     event::{Event, WindowEvent},
     event_loop::EventLoop,
     window::Window,
 };
+
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct IParams {
+    camera_pos: [f32; 3],
+    _pad1: u32,
+    width: u32,
+    height: u32,
+    i_time: f32,
+    sphere_count: u32,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct Sphere {
+    center: [f32; 3],
+    radius: f32,
+    material: Material,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct Material {
+    diffuse_color: [f32; 3],
+    _pad: f32,
+    emission_color: [f32; 3],
+    emission_strength: f32,
+}
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
     let window = Arc::new(window);
@@ -30,21 +58,18 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let size = window.inner_size();
     let swapchain_capabilities = surface.get_capabilities(&adapter);
     let format = swapchain_capabilities.formats[0];
-    let sc = wgpu::SurfaceConfiguration {
+    let mut sc = wgpu::SurfaceConfiguration {
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
         format,
         width: size.width,
         height: size.height,
-        present_mode: wgpu::PresentMode::AutoNoVsync,
+        present_mode: wgpu::PresentMode::AutoVsync,
         alpha_mode: swapchain_capabilities.alpha_modes[0],
         view_formats: vec![],
         desired_maximum_frame_latency: 2,
     };
     surface.configure(&device, &sc);
 
-    // We use a render pipeline just to copy the output buffer of the compute shader to the
-    // swapchain. It would be nice if we could skip this, but swapchains with storage usage
-    // are not fully portable.
     let copy_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
         source: wgpu::ShaderSource::Wgsl(
@@ -60,7 +85,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         multisampled: false,
-                        // Should filterable be false if we want nearest-neighbor?
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
                     },
@@ -69,7 +93,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(SamplerBindingType::NonFiltering),
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
                     count: None,
                 },
             ],
@@ -86,13 +110,13 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             module: &copy_shader,
             entry_point: Some("vs_main"),
             buffers: &[],
-            compilation_options: PipelineCompilationOptions::default(),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
         },
         fragment: Some(wgpu::FragmentState {
             module: &copy_shader,
             entry_point: Some("fs_main"),
             targets: &[Some(format.into())],
-            compilation_options: PipelineCompilationOptions::default(),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
         }),
         primitive: wgpu::PrimitiveState::default(),
         depth_stencil: None,
@@ -103,7 +127,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     let img = device.create_texture(&wgpu::TextureDescriptor {
         label: None,
-        size: Extent3d {
+        size: wgpu::Extent3d {
             width: size.width,
             height: size.height,
             depth_or_array_layers: 1,
@@ -117,15 +141,42 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     });
     let img_view = img.create_view(&Default::default());
 
-    const CONFIG_SIZE: u64 = 12;
+    const CONFIG_SIZE: u64 = size_of::<IParams>() as u64;
 
     let config_dev = device.create_buffer(&wgpu::BufferDescriptor {
         label: None,
         size: CONFIG_SIZE,
-        usage: BufferUsages::COPY_DST | BufferUsages::STORAGE | BufferUsages::UNIFORM,
+        usage: wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::UNIFORM,
         mapped_at_creation: false,
     });
     let config_resource = config_dev.as_entire_binding();
+
+    let spheres = (0..2)
+        .map(|i| Sphere {
+            center: if i == 0 {
+                Vec3::NEG_Y.into()
+            } else {
+                Vec3::Y.into()
+            },
+            radius: 1.0,
+            material: Material {
+                diffuse_color: Vec3::new(1.0, 0.0, 0.0).into(),
+                _pad: 0.0,
+                emission_color: Vec3::new(1.0, 1.0, 1.0).into(),
+                emission_strength: if i == 0 { 1.0 } else { 0.0 },
+            },
+        })
+        .collect::<Vec<_>>();
+
+    let sphere_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Sphere Buffer"),
+        contents: bytemuck::cast_slice(&spheres),
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
+    });
 
     let cs_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
@@ -158,6 +209,16 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 },
                 count: None,
             },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
         ],
     });
     let compute_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -171,7 +232,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         module: &cs_module,
         entry_point: Some("main"),
         cache: None,
-        compilation_options: PipelineCompilationOptions::default(),
+        compilation_options: wgpu::PipelineCompilationOptions::default(),
     });
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
@@ -184,6 +245,10 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             wgpu::BindGroupEntry {
                 binding: 1,
                 resource: wgpu::BindingResource::TextureView(&img_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: sphere_buffer.as_entire_binding(),
             },
         ],
     });
@@ -226,12 +291,19 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             .expect("error getting texture from swap chain");
 
                         let i_time: f32 = 0.5 + start_time.elapsed().as_micros() as f32 * 1e-6;
-                        let config_data = [size.width, size.height, i_time.to_bits()];
+                        let config_data = IParams {
+                            camera_pos: Vec3::new(0.0, 0.0, 5.0).into(),
+                            _pad1: 0,
+                            width: size.width,
+                            height: size.height,
+                            i_time,
+                            sphere_count: 2,
+                        };
                         let config_host =
                             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                                 label: None,
-                                contents: bytemuck::bytes_of(&config_data),
-                                usage: BufferUsages::COPY_SRC,
+                                contents: bytemuck::cast_slice(&[config_data]),
+                                usage: wgpu::BufferUsages::COPY_SRC,
                             });
                         let mut encoder = device.create_command_encoder(&Default::default());
                         encoder.copy_buffer_to_buffer(&config_host, 0, &config_dev, 0, CONFIG_SIZE);
@@ -268,6 +340,13 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         frame.present();
                         window_clone.request_redraw();
                     }
+                    WindowEvent::Resized(size) => {
+                        if size.width > 0 && size.height > 0 {
+                            sc.width = size.width;
+                            sc.height = size.height;
+                            surface.configure(&device, &sc);
+                        }
+                    }
                     WindowEvent::CloseRequested => {
                         target.exit();
                     }
@@ -281,7 +360,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 fn main() {
     let event_loop = EventLoop::new().unwrap();
     let window = Window::new(&event_loop).unwrap();
-    window.set_resizable(false);
     window.set_title("Ray Tracing");
     pollster::block_on(run(event_loop, window));
 }
