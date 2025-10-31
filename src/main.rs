@@ -1,6 +1,6 @@
 use std::{collections::HashSet, sync::Arc};
 
-use glam::{Quat, Vec2, Vec3};
+use glam::{Mat3A, Quat, Vec2, Vec3};
 use wgpu::util::DeviceExt;
 
 use winit::{
@@ -404,8 +404,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         }
 
                         let window_scale = size.height.max(size.width) as f32;
-                        pitch -= (mouse_delta.y * window_scale * 0.0015).to_radians();
-                        yaw -= (mouse_delta.x * window_scale * 0.0015).to_radians();
+                        pitch -= (mouse_delta.y * window_scale * 0.00015).to_radians();
+                        yaw -= (mouse_delta.x * window_scale * 0.00015).to_radians();
                         mouse_delta = Vec2::ZERO;
                         camera_pos += move_dir.normalize_or_zero()
                             * if keys_pressed.contains(&KeyCode::ControlLeft) {
@@ -425,6 +425,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         let config_data = IParams {
                             camera_pos,
                             random_seed: rand::random(),
+                            camera_dir: Mat3A::from_quat(camera_dir),
                             light_dir: light_dir.normalize_or_zero(),
                             accumulated_frames,
                             width: size.width,
@@ -438,7 +439,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             let mut cpass = encoder.begin_compute_pass(&Default::default());
                             cpass.set_pipeline(&pipeline);
                             cpass.set_bind_group(0, &bind_group, &[]);
-                            cpass.dispatch_workgroups(size.width / 16, size.height / 16, 1);
+                            cpass.dispatch_workgroups(size.width / 4, size.height / 4, 1);
                         }
                         {
                             let view = frame
@@ -555,11 +556,29 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             keys_pressed.remove(&code);
                         }
                     }
+                    WindowEvent::MouseInput { state, button, .. } => {
+                        if button == winit::event::MouseButton::Left
+                            && state.is_pressed()
+                            && !mouse_grabbed
+                        {
+                            window_clone
+                                .set_cursor_grab(CursorGrabMode::Confined)
+                                .unwrap();
+                            window_clone.set_cursor_visible(false);
+                            mouse_grabbed = true;
+                        }
+                    }
                     WindowEvent::CloseRequested => {
                         target.exit();
                     }
                     _ => (),
                 }
+            } else if let Event::DeviceEvent { event, .. } = event
+                && let winit::event::DeviceEvent::MouseMotion { delta } = event
+                && mouse_grabbed
+            {
+                mouse_delta += Vec2::new(delta.0 as f32, delta.1 as f32);
+                accumulated_frames = 0;
             }
         })
         .unwrap();

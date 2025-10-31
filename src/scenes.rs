@@ -140,7 +140,7 @@ pub fn cornell_box() -> (Vec<Sphere>, Vec<TriangleMesh>) {
                 diffuse_color: Vec3::new(0.8, 0.8, 0.8),
                 emission_color: Vec3::new(0.0, 0.0, 0.0),
                 emission_strength: 0.0,
-                smoothness: 0.0,
+                smoothness: 0.997,
             },
         },
         // top
@@ -161,10 +161,10 @@ pub fn cornell_box() -> (Vec<Sphere>, Vec<TriangleMesh>) {
                 diffuse_color: Vec3::new(0.8, 0.8, 0.8),
                 emission_color: Vec3::new(0.0, 0.0, 0.0),
                 emission_strength: 0.0,
-                smoothness: 0.0,
+                smoothness: 0.997,
             },
         },
-        // back
+        // front
         TriangleMesh {
             vertices: vec![
                 Vec3::new(-10.0, -10.0, -10.0),
@@ -182,7 +182,7 @@ pub fn cornell_box() -> (Vec<Sphere>, Vec<TriangleMesh>) {
                 diffuse_color: Vec3::new(0.8, 0.8, 0.8),
                 emission_color: Vec3::new(0.0, 0.0, 0.0),
                 emission_strength: 0.0,
-                smoothness: 0.0,
+                smoothness: 0.997,
             },
         },
         // left (red)
@@ -203,7 +203,7 @@ pub fn cornell_box() -> (Vec<Sphere>, Vec<TriangleMesh>) {
                 diffuse_color: Vec3::new(0.8, 0.0, 0.0),
                 emission_color: Vec3::new(0.0, 0.0, 0.0),
                 emission_strength: 0.0,
-                smoothness: 0.0,
+                smoothness: 0.997,
             },
         },
         // right (green)
@@ -224,10 +224,10 @@ pub fn cornell_box() -> (Vec<Sphere>, Vec<TriangleMesh>) {
                 diffuse_color: Vec3::new(0.0, 0.8, 0.0),
                 emission_color: Vec3::new(0.0, 0.0, 0.0),
                 emission_strength: 0.0,
-                smoothness: 0.0,
+                smoothness: 0.997,
             },
         },
-        // front
+        // back
         TriangleMesh {
             vertices: vec![
                 Vec3::new(-10.0, -10.0, 10.0),
@@ -245,7 +245,7 @@ pub fn cornell_box() -> (Vec<Sphere>, Vec<TriangleMesh>) {
                 diffuse_color: Vec3::new(0.8, 0.8, 0.8),
                 emission_color: Vec3::new(0.0, 0.0, 0.0),
                 emission_strength: 0.0,
-                smoothness: 0.0,
+                smoothness: 0.997,
             },
         },
         // light

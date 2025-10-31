@@ -5,6 +5,7 @@ use glam::*;
 pub struct IParams {
     pub camera_pos: Vec3,
     pub random_seed: f32,
+    pub camera_dir: Mat3A,
     pub light_dir: Vec3,
     pub accumulated_frames: u32,
     pub width: u32,

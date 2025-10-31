@@ -7,6 +7,7 @@
 struct Params {
     camera_pos: vec3f,
     random_seed: f32,
+    camera_dir: mat3x3f,
     light_dir: vec3f,
     accumulated_frames: u32,
     width: u32,
@@ -57,7 +58,7 @@ struct RayHit {
 const PI: f32 = 3.141592;
 
 const MAX_BOUNCES: u32 = 5u;
-const RAYS_PER_PIXEL: u32 = 5u;
+const RAYS_PER_PIXEL: u32 = 10u;
 
 const GROUND_COLOR: vec3f = vec3f(0.35, 0.3, 0.35);
 const SKY_COLOR_HORIZON: vec3f = vec3f(1.0, 1.0, 1.0);
@@ -133,7 +134,7 @@ fn trace_single(ray: ptr<function, Ray>, state: ptr<function, u32>) -> vec3f {
     for (var bounce: u32 = 0u; bounce < MAX_BOUNCES; bounce = bounce + 1u) {
         let hit = calculate_collision(*ray);
         if hit.hit {
-            (*ray).origin = hit.position + hit.normal * 0.001;
+            (*ray).origin = hit.position;
             let diffuse = normalize(hit.normal + random_direction(state));
             let specular = reflect((*ray).direction, hit.normal);
 
@@ -257,23 +258,24 @@ fn triangle_intersect(ray: Ray, v0_idx: u32) -> RayHit {
     return hit;
 }
 
-@compute @workgroup_size(16, 16)
+@compute @workgroup_size(4, 4)
 fn main(@builtin(global_invocation_id) global_ix: vec3<u32>) {
     let frag_coord = vec2f(global_ix.xy) / vec2f(f32(params.width), f32(params.height)) ;
+
+    var state = hash(frag_coord.xy + params.random_seed);
 
     let aspect_ratio = f32(params.width) / f32(params.height);
     let half_fov_tan = tan(radians(60.0) * 0.5);
     let px = (2.0 * frag_coord.x - 1.0) * half_fov_tan * aspect_ratio;
     let py = (1.0 - 2.0 * frag_coord.y) * half_fov_tan;
-    let ray_dir = normalize(vec3f(px, py, -1.0));
+    let ray_dir = normalize(params.camera_dir * vec3f(px, py, -1.0) + random_direction(&state) * 0.001);
     var ray = Ray(params.camera_pos, ray_dir);
-
-    var state = hash(frag_coord.xy + params.random_seed);
-
     let last_frame = textureLoad(output_tex, vec2i(global_ix.xy)).rgb;
-    let weight = 1.0 / f32(params.accumulated_frames + 1u);
+    var frag_color = trace(&ray, &state);
 
-    var frag_color = vec4f(mix(last_frame.rgb, trace(&ray, &state), weight), 1.0);
+    if params.accumulated_frames > 5u {
+        frag_color = mix(last_frame, frag_color, 1.0 / f32(params.accumulated_frames - 5u));
+    }
 
-    textureStore(output_tex, vec2i(global_ix.xy), frag_color);
+    textureStore(output_tex, vec2i(global_ix.xy), vec4f(frag_color, 1.0));
 }
