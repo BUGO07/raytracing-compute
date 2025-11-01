@@ -12,8 +12,6 @@ struct Params {
     accumulated_frames: u32,
     width: u32,
     height: u32,
-    triangle_mesh_count: u32,
-    sphere_count: u32,
 };
 
 struct Material {
@@ -21,6 +19,8 @@ struct Material {
     smoothness: f32,
     emission_color: vec3f,
     emission_strength: f32,
+    refractive_index: f32,
+    flag: u32,
 };
 
 struct Sphere {
@@ -51,6 +51,7 @@ struct RayHit {
     distance: f32,
     position: vec3f,
     normal: vec3f,
+    is_backface: bool,
     material: Material,
     hit: bool,
 };
@@ -136,9 +137,17 @@ fn trace_single(ray: ptr<function, Ray>, state: ptr<function, u32>) -> vec3f {
         if hit.hit {
             (*ray).origin = hit.position;
             let diffuse = normalize(hit.normal + random_direction(state));
-            let specular = reflect((*ray).direction, hit.normal);
+            let specular = reflect((*ray).direction, hit.normal, 0.0);
 
-            (*ray).direction = mix(diffuse, specular, hit.material.smoothness);
+            if hit.material.flag == 1u {
+                if hit.is_backface {
+                    let refracted = refract((*ray).direction, hit.normal, hit.material.refractive_index);
+                    let kr = pow(1.0 - max(dot(-(*ray).direction, hit.normal), 0.0), 5.0);
+                    (*ray).direction = normalize(mix(refracted, specular, kr));
+                }
+            } else {
+                (*ray).direction = mix(diffuse, specular, hit.material.smoothness);
+            }
 
             let emitted = hit.material.emission_color * hit.material.emission_strength;
             color = color * hit.material.diffuse_color;
@@ -152,28 +161,46 @@ fn trace_single(ray: ptr<function, Ray>, state: ptr<function, u32>) -> vec3f {
     return light;
 }
 
-fn reflect(I: vec3f, N: vec3f) -> vec3f {
+fn reflect(I: vec3f, N: vec3f, index: f32) -> vec3f {
     return I - 2.0 * dot(N, I) * N;
+}
+
+fn refract(I: vec3f, N: vec3f, index: f32) -> vec3f {
+    var cosi = clamp(dot(I, N), -1.0, 1.0);
+    let etai = 1.0;
+    let etat = index;
+    var n = N;
+    var eta = etai / etat;
+    if cosi < 0.0 {
+        cosi = -cosi;
+    } else {
+        n = -N;
+    }
+    let k = 1.0 - eta * eta * (1.0 - cosi * cosi);
+    if k < 0.0 {
+        return vec3f(0.0, 0.0, 0.0);
+    } else {
+        return eta * I + (eta * cosi - sqrt(k)) * n;
+    }
 }
 
 fn calculate_collision(ray: Ray) -> RayHit {
     var closest_hit: RayHit;
-    for (var i: u32 = 0u; i < params.sphere_count; i = i + 1u) {
+    for (var i: u32 = 0u; i < arrayLength(&spheres); i = i + 1u) {
         let hit = sphere_intersect(ray, spheres[i]);
         if hit.hit && (!closest_hit.hit || hit.distance < closest_hit.distance) {
             closest_hit = hit;
         }
     }
-    for (var i: u32 = 0u; i < params.triangle_mesh_count; i = i + 1u) {
+    for (var i: u32 = 0u; i < arrayLength(&triangle_meshes); i = i + 1u) {
         let tri_mesh = triangle_meshes[i];
-        if !aabb_intersect(ray, tri_mesh.aabb) {
-            continue;
-        }
-        for (var j: u32 = 0u; j < tri_mesh.vertex_count / 3u; j = j + 1u) {
-            let hit = triangle_intersect(ray, tri_mesh.start_index + j * 3u);
-            if hit.hit && (!closest_hit.hit || hit.distance < closest_hit.distance) {
-                closest_hit = hit;
-                closest_hit.material = tri_mesh.material;
+        if aabb_intersect(ray, tri_mesh.aabb) {
+            for (var j: u32 = 0u; j < tri_mesh.vertex_count / 3u; j = j + 1u) {
+                let hit = triangle_intersect(ray, tri_mesh.start_index + j * 3u, tri_mesh.material.flag == 0u);
+                if hit.hit && (!closest_hit.hit || hit.distance < closest_hit.distance) {
+                    closest_hit = hit;
+                    closest_hit.material = tri_mesh.material;
+                }
             }
         }
     }
@@ -198,25 +225,22 @@ fn sphere_intersect(ray: Ray, sphere: Sphere) -> RayHit {
     let b = 2.0 * dot(oc, ray.direction);
     let c = dot(oc, oc) - sphere.radius * sphere.radius;
     let discriminant = b * b - 4.0 * a * c;
-    if discriminant < 0.0 {
-        return hit;
-    } else {
+    if discriminant >= 0.0 {
         let t = (-b - sqrt(discriminant)) / (2.0 * a);
-        if t > 0.0 {
+        if t > 1e-5 {
             hit.distance = t;
             hit.material = sphere.material;
             hit.position = ray.origin + t * ray.direction;
             hit.normal = normalize(hit.position - sphere.position);
+            hit.is_backface = dot(ray.direction, hit.normal) < 0.0;
             hit.hit = true;
-            return hit;
-        } else {
-            return hit;
         }
     }
+    return hit;
 }
 
 // moller-trumbore algorithm
-fn triangle_intersect(ray: Ray, v0_idx: u32) -> RayHit {
+fn triangle_intersect(ray: Ray, v0_idx: u32, detect_backface: bool) -> RayHit {
     var hit: RayHit;
     let v0 = triangle_vertices[v0_idx].xyz;
     let v1 = triangle_vertices[v0_idx + 1u].xyz;
@@ -246,15 +270,24 @@ fn triangle_intersect(ray: Ray, v0_idx: u32) -> RayHit {
         return hit;
     }
 
+    let w = 1.0 - u - v;
+
     let t = f * dot(edge2, q);
 
-    if t > 0.0001 {
-        hit.distance = t;
-        hit.position = ray.origin + t * ray.direction;
-        hit.normal = normalize(cross(edge1, edge2));
-        hit.hit = true;
+    let tri_face_vector = cross(edge1, edge2);
+    let determinant = dot(tri_face_vector, ray.direction);
+    var is_valid: bool;
+    if detect_backface {
+        is_valid = abs(determinant) >= 1e-8;
+    } else {
+        is_valid = determinant >= 1e-8;
     }
 
+    hit.hit = is_valid && t > 1e-5 && u >= 0.0 && v >= 0.0 && w >= 0.0;
+    hit.normal = normalize(tri_face_vector) * -sign(determinant);
+    hit.distance = t;
+    hit.position = ray.origin + t * ray.direction;
+    hit.is_backface = determinant > 0.0;
     return hit;
 }
 

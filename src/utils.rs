@@ -1,7 +1,7 @@
 use glam::*;
 
 #[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Default, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct IParams {
     pub camera_pos: Vec3,
     pub random_seed: f32,
@@ -10,8 +10,7 @@ pub struct IParams {
     pub accumulated_frames: u32,
     pub width: u32,
     pub height: u32,
-    pub triangle_mesh_count: u32,
-    pub sphere_count: u32,
+    pub _pad: [u32; 2],
 }
 
 #[repr(C)]
@@ -52,4 +51,7 @@ pub struct Material {
     pub smoothness: f32,
     pub emission_color: Vec3,
     pub emission_strength: f32,
+    pub refractive_index: f32,
+    pub flag: u32,
+    pub _pad: [u32; 2],
 }

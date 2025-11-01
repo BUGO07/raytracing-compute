@@ -430,8 +430,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             accumulated_frames,
                             width: size.width,
                             height: size.height,
-                            triangle_mesh_count: gpu_triangles.len() as u32,
-                            sphere_count: spheres.len() as u32,
+                            ..Default::default()
                         };
                         queue.write_buffer(&config_dev, 0, bytemuck::bytes_of(&config_data));
                         let mut encoder = device.create_command_encoder(&Default::default());

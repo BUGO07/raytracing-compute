@@ -12,6 +12,9 @@ pub fn spheres() -> (Vec<Sphere>, Vec<TriangleMesh>) {
                 emission_color: Vec3::new(0.0, 0.0, 0.0),
                 emission_strength: 0.0,
                 smoothness: 0.0,
+                refractive_index: 1.0,
+                flag: 0,
+                ..Default::default()
             },
         },
         Sphere {
@@ -22,6 +25,9 @@ pub fn spheres() -> (Vec<Sphere>, Vec<TriangleMesh>) {
                 emission_color: Vec3::new(0.0, 0.0, 0.0),
                 emission_strength: 0.0,
                 smoothness: 0.0,
+                refractive_index: 1.0,
+                flag: 0,
+                ..Default::default()
             },
         },
         Sphere {
@@ -32,6 +38,9 @@ pub fn spheres() -> (Vec<Sphere>, Vec<TriangleMesh>) {
                 emission_color: Vec3::new(0.23, 1.0, 0.01),
                 emission_strength: 0.0,
                 smoothness: 0.0,
+                refractive_index: 1.0,
+                flag: 0,
+                ..Default::default()
             },
         },
         Sphere {
@@ -42,6 +51,9 @@ pub fn spheres() -> (Vec<Sphere>, Vec<TriangleMesh>) {
                 emission_color: Vec3::new(0.0, 0.0, 0.0),
                 emission_strength: 0.0,
                 smoothness: 0.0,
+                refractive_index: 1.0,
+                flag: 0,
+                ..Default::default()
             },
         },
         Sphere {
@@ -52,6 +64,9 @@ pub fn spheres() -> (Vec<Sphere>, Vec<TriangleMesh>) {
                 emission_color: Vec3::new(1.0, 1.0, 1.0),
                 emission_strength: 0.0,
                 smoothness: 0.0,
+                refractive_index: 1.3,
+                flag: 1,
+                ..Default::default()
             },
         },
         Sphere {
@@ -61,7 +76,10 @@ pub fn spheres() -> (Vec<Sphere>, Vec<TriangleMesh>) {
                 diffuse_color: Vec3::new(0.38, 0.16, 0.81),
                 emission_color: Vec3::new(0.38, 0.16, 0.81),
                 emission_strength: 0.0,
-                smoothness: 0.0,
+                smoothness: 0.95,
+                refractive_index: 1.0,
+                flag: 0,
+                ..Default::default()
             },
         },
     ];
@@ -77,10 +95,13 @@ pub fn spheres() -> (Vec<Sphere>, Vec<TriangleMesh>) {
             max: Vec3::new(-1.0, 2.0, -3.0).extend(0.0),
         },
         material: Material {
-            diffuse_color: Vec3::new(1.0, 0.5, 0.0),
-            emission_color: Vec3::new(1.0, 0.5, 0.0),
-            emission_strength: 0.5,
-            smoothness: 0.0,
+            diffuse_color: Vec3::ONE,
+            emission_color: Vec3::ONE,
+            emission_strength: 0.0,
+            smoothness: 1.0,
+            refractive_index: 1.4,
+            flag: 1,
+            ..Default::default()
         },
     }];
 
@@ -97,6 +118,9 @@ pub fn cornell_box() -> (Vec<Sphere>, Vec<TriangleMesh>) {
                 emission_color: Vec3::new(1.0, 1.0, 0.0),
                 emission_strength: 0.2,
                 smoothness: 0.2,
+                refractive_index: 1.0,
+                flag: 0,
+                ..Default::default()
             },
         },
         Sphere {
@@ -107,6 +131,9 @@ pub fn cornell_box() -> (Vec<Sphere>, Vec<TriangleMesh>) {
                 emission_color: Vec3::new(1.0, 1.0, 1.0),
                 emission_strength: 0.0,
                 smoothness: 1.0,
+                refractive_index: 1.0,
+                flag: 1,
+                ..Default::default()
             },
         },
         Sphere {
@@ -117,6 +144,9 @@ pub fn cornell_box() -> (Vec<Sphere>, Vec<TriangleMesh>) {
                 emission_color: Vec3::new(0.0, 1.0, 0.0),
                 emission_strength: 0.2,
                 smoothness: 0.1,
+                refractive_index: 1.0,
+                flag: 0,
+                ..Default::default()
             },
         },
     ];
@@ -141,6 +171,9 @@ pub fn cornell_box() -> (Vec<Sphere>, Vec<TriangleMesh>) {
                 emission_color: Vec3::new(0.0, 0.0, 0.0),
                 emission_strength: 0.0,
                 smoothness: 0.997,
+                refractive_index: 1.0,
+                flag: 0,
+                ..Default::default()
             },
         },
         // top
@@ -162,6 +195,9 @@ pub fn cornell_box() -> (Vec<Sphere>, Vec<TriangleMesh>) {
                 emission_color: Vec3::new(0.0, 0.0, 0.0),
                 emission_strength: 0.0,
                 smoothness: 0.997,
+                refractive_index: 1.0,
+                flag: 0,
+                ..Default::default()
             },
         },
         // front
@@ -183,6 +219,9 @@ pub fn cornell_box() -> (Vec<Sphere>, Vec<TriangleMesh>) {
                 emission_color: Vec3::new(0.0, 0.0, 0.0),
                 emission_strength: 0.0,
                 smoothness: 0.997,
+                refractive_index: 1.0,
+                flag: 0,
+                ..Default::default()
             },
         },
         // left (red)
@@ -204,6 +243,9 @@ pub fn cornell_box() -> (Vec<Sphere>, Vec<TriangleMesh>) {
                 emission_color: Vec3::new(0.0, 0.0, 0.0),
                 emission_strength: 0.0,
                 smoothness: 0.997,
+                refractive_index: 1.0,
+                flag: 0,
+                ..Default::default()
             },
         },
         // right (green)
@@ -225,6 +267,9 @@ pub fn cornell_box() -> (Vec<Sphere>, Vec<TriangleMesh>) {
                 emission_color: Vec3::new(0.0, 0.0, 0.0),
                 emission_strength: 0.0,
                 smoothness: 0.997,
+                refractive_index: 1.0,
+                flag: 0,
+                ..Default::default()
             },
         },
         // back
@@ -246,6 +291,9 @@ pub fn cornell_box() -> (Vec<Sphere>, Vec<TriangleMesh>) {
                 emission_color: Vec3::new(0.0, 0.0, 0.0),
                 emission_strength: 0.0,
                 smoothness: 0.997,
+                refractive_index: 1.0,
+                flag: 0,
+                ..Default::default()
             },
         },
         // light
@@ -267,6 +315,9 @@ pub fn cornell_box() -> (Vec<Sphere>, Vec<TriangleMesh>) {
                 emission_color: Vec3::new(1.0, 1.0, 1.0),
                 emission_strength: 5.0,
                 smoothness: 0.0,
+                refractive_index: 1.0,
+                flag: 0,
+                ..Default::default()
             },
         },
     ];
